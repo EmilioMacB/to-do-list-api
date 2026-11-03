@@ -64,23 +64,58 @@ resource "aws_instance" "todo_api" {
               apt-get update -y
               apt-get install -y git curl
               
-              # Instalar Node.js versión 20
               curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
               apt-get install -y nodejs
               
-              # Clonar el repositorio
               git clone https://github.com/EmilioMacB/to-do-list-api.git /home/ubuntu/to-do-list-api
               cd /home/ubuntu/to-do-list-api
               
-              # Instalar librerías y compilar TypeScript
               npm install
               npm run build
               
-              # Ejecutar el servidor en segundo plano
+              # Inyectar variables de conexión dinámicamente desde Terraform
+              export DB_HOST=${aws_db_instance.todo_db.address}
+              export DB_USER=${aws_db_instance.todo_db.username}
+              export DB_PASSWORD=${aws_db_instance.todo_db.password}
+              export DB_NAME=${aws_db_instance.todo_db.db_name}
+              
               nohup npm run start > app.log 2>&1 &
               EOF
 
   tags = {
     Name = "ToDo-API-Server"
   }
+}
+
+# 4. Security Group para RDS
+resource "aws_security_group" "rds_sg" {
+  name        = "todo_db_sg"
+  description = "Permitir trafico PostgreSQL solo desde la EC2"
+
+  ingress {
+    from_port       = 5432
+    to_port         = 5432
+    protocol        = "tcp"
+    security_groups = [aws_security_group.todo_sg.id]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+# 5. Instancia RDS PostgreSQL
+resource "aws_db_instance" "todo_db" {
+  allocated_storage      = 20
+  engine                 = "postgres"
+  engine_version         = "15"
+  instance_class         = "db.t3.micro"
+  db_name                = "tododb"
+  username               = "postgres"
+  password               = "supersecreto123"
+  skip_final_snapshot    = true
+  vpc_security_group_ids = [aws_security_group.rds_sg.id]
 }
