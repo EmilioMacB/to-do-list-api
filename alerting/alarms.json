@@ -1,0 +1,52 @@
+{
+  "alarms": [
+    {
+      "name": "todo-api-ec2-cpu-alta",
+      "description": "CPU de la EC2 de la API sostenida por encima del 80 %.",
+      "namespace": "AWS/EC2",
+      "metric_name": "CPUUtilization",
+      "statistic": "Average",
+      "dimensions": { "InstanceId": "${instance_id}" },
+      "period": 300,
+      "evaluation_periods": 3,
+      "datapoints_to_alarm": 3,
+      "comparison_operator": "GreaterThanThreshold",
+      "threshold": 80,
+      "treat_missing_data": "missing",
+      "justificacion": "Métrica nativa (monitoreo básico de EC2 = 1 dato cada 5 min). Picos cortos son normales (deploy, pip install); 3 periodos seguidos (15 min) arriba de 80 % indican saturación real de la t2.micro y consumo de créditos de CPU burstable.",
+      "accion": "Revisar en el dashboard si la latencia subió al mismo tiempo; revisar el proceso con SSM (top, journalctl -u todo-api); si es carga legítima, escalar el instance_type en Terraform."
+    },
+    {
+      "name": "todo-api-rds-errores",
+      "description": "La API no pudo leer o escribir en RDS (métrica propia DatabaseErrors).",
+      "namespace": "TodoApi",
+      "metric_name": "DatabaseErrors",
+      "statistic": "Sum",
+      "dimensions": {},
+      "period": 60,
+      "evaluation_periods": 5,
+      "datapoints_to_alarm": 1,
+      "comparison_operator": "GreaterThanOrEqualToThreshold",
+      "threshold": 1,
+      "treat_missing_data": "notBreaching",
+      "justificacion": "Con tráfico bajo, cualquier error de BD significa que un usuario perdió una lectura o escritura: tolerancia cero (>= 1). Periodo de 1 min para detectar rápido; regla 1 de 5 para que la alarma no oscile entre ALARM y OK mientras la caída continúa (vuelve a OK tras 5 min sin errores). Sin datos = sin errores (notBreaching).",
+      "accion": "Ver estado de RDS (aws rds describe-db-instances): si está detenida o reiniciándose, arrancarla; si está disponible, revisar Secrets Manager y los logs de la app (journalctl -u todo-api)."
+    },
+    {
+      "name": "todo-api-latencia-alta",
+      "description": "El p95 de la latencia de la API supera 1 segundo (métrica propia RequestLatency).",
+      "namespace": "TodoApi",
+      "metric_name": "RequestLatency",
+      "extended_statistic": "p95",
+      "dimensions": {},
+      "period": 300,
+      "evaluation_periods": 3,
+      "datapoints_to_alarm": 2,
+      "comparison_operator": "GreaterThanThreshold",
+      "threshold": 1000,
+      "treat_missing_data": "notBreaching",
+      "justificacion": "La latencia normal medida es 80-130 ms; 1 s es ~10x lo normal y el límite en que un usuario percibe la app como lenta. p95 (no promedio) para que unas cuantas peticiones lentas no se escondan entre muchas rápidas. 2 de 3 periodos de 5 min ignoran una petición lenta aislada (arranque en frío, primera conexión) pero detectan una degradación de 10-15 min.",
+      "accion": "Comparar en el dashboard con CPU de EC2 (¿saturación?) y DatabaseErrors (¿RDS no responde y cada petición espera el timeout de 3 s?). Actuar sobre la causa: escalar EC2 o revisar RDS."
+    }
+  ]
+}

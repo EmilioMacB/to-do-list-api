@@ -1,0 +1,72 @@
+{
+  "widgets": [
+    {
+      "type": "text",
+      "x": 0, "y": 0, "width": 24, "height": 2,
+      "properties": {
+        "markdown": "# To-Do List API — observabilidad\nNativa: **CPU de la EC2** · Propias (namespace `TodoApi`, publicadas por la app con `put_metric_data`): **DatabaseErrors** y **RequestLatency**. Las líneas rojas son los umbrales de las alarmas."
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0, "y": 2, "width": 8, "height": 6,
+      "properties": {
+        "title": "1 · CPU de la EC2 (%) — nativa",
+        "region": "${region}",
+        "view": "timeSeries",
+        "stat": "Average",
+        "period": 300,
+        "metrics": [
+          ["AWS/EC2", "CPUUtilization", "InstanceId", "${instance_id}", { "label": "CPU promedio" }]
+        ],
+        "yAxis": { "left": { "min": 0, "max": 100 } },
+        "annotations": { "horizontal": [{ "label": "Umbral alarma (80 %)", "value": 80, "color": "#d13212" }] }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 8, "y": 2, "width": 8, "height": 6,
+      "properties": {
+        "title": "2 · Errores al leer/escribir en RDS — propia",
+        "region": "${region}",
+        "view": "timeSeries",
+        "stat": "Sum",
+        "period": 60,
+        "metrics": [
+          ["TodoApi", "DatabaseErrors", { "label": "Errores por minuto", "color": "#d13212" }]
+        ],
+        "yAxis": { "left": { "min": 0 } },
+        "annotations": { "horizontal": [{ "label": "Umbral alarma (>= 1)", "value": 1, "color": "#d13212" }] }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 16, "y": 2, "width": 8, "height": 6,
+      "properties": {
+        "title": "3 · Latencia de la API (ms) — propia",
+        "region": "${region}",
+        "view": "timeSeries",
+        "period": 300,
+        "metrics": [
+          ["TodoApi", "RequestLatency", { "stat": "p95", "label": "p95" }],
+          ["TodoApi", "RequestLatency", { "stat": "Average", "label": "Promedio" }],
+          ["TodoApi", "RequestLatency", { "stat": "SampleCount", "label": "Peticiones", "yAxis": "right" }]
+        ],
+        "yAxis": { "left": { "min": 0, "label": "ms" }, "right": { "min": 0, "label": "peticiones" } },
+        "annotations": { "horizontal": [{ "label": "Umbral alarma p95 (1000 ms)", "value": 1000, "color": "#d13212" }] }
+      }
+    },
+    {
+      "type": "alarm",
+      "x": 0, "y": 8, "width": 24, "height": 3,
+      "properties": {
+        "title": "Estado de las alarmas",
+        "alarms": [
+          "arn:aws:cloudwatch:${region}:${account_id}:alarm:todo-api-ec2-cpu-alta",
+          "arn:aws:cloudwatch:${region}:${account_id}:alarm:todo-api-rds-errores",
+          "arn:aws:cloudwatch:${region}:${account_id}:alarm:todo-api-latencia-alta"
+        ]
+      }
+    }
+  ]
+}
