@@ -1,0 +1,62 @@
+# Release: al hacer push de un tag vX.Y.Z empaqueta el repo en un zip y crea
+# un GitHub Release con ese zip adjunto.
+#
+#   git tag v1.0.0 && git push origin v1.0.0
+#
+# El Release se crea con el secret RELEASE_TOKEN (un PAT) y NO con el
+# GITHUB_TOKEN automático: los eventos generados con GITHUB_TOKEN no disparan
+# otros workflows, y necesitamos que `release: published` dispare deploy.yml.
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: read # el Release lo crea el PAT, este token no necesita escribir
+
+jobs:
+  release:
+    name: crear release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    env:
+      TAG: ${{ github.ref_name }} # p. ej. v1.0.0
+      GH_TOKEN: ${{ secrets.RELEASE_TOKEN }} # lo usa la CLI `gh`
+
+    steps:
+      - name: Validar el tag y el token
+        # El filtro v*.*.* es un glob y también aceptaría v1.2.3-beta o v1.x.y;
+        # aquí exigimos el formato estricto vNUM.NUM.NUM.
+        run: |
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::El tag '$TAG' no cumple el formato v#.#.# (ej. v1.0.0)"
+            exit 1
+          fi
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::Falta el secret RELEASE_TOKEN (PAT con Contents: Read and write sobre este repo)."
+            exit 1
+          fi
+
+      - name: Descargar el código del tag
+        uses: actions/checkout@v5
+
+      - name: Empaquetar el repo en zip
+        # git archive solo incluye archivos versionados: nada de .venv, tfstate,
+        # llaves ni caches. --prefix mete todo dentro de la carpeta todo-api/.
+        run: |
+          git archive --format=zip --prefix=todo-api/ -o "todo-api-${TAG}.zip" HEAD
+          unzip -l "todo-api-${TAG}.zip"
+
+      - name: Crear el GitHub Release
+        # --verify-tag: falla si el tag no existe en el remoto (no crea uno nuevo).
+        # --generate-notes: GitHub arma las notas con los PRs/commits desde el tag anterior.
+        run: |
+          gh release create "$TAG" "todo-api-${TAG}.zip" \
+            --repo "${{ github.repository }}" \
+            --title "$TAG" \
+            --generate-notes \
+            --verify-tag
+          echo "## Release ${TAG} creado" >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ github.server_url }}/${{ github.repository }}/releases/tag/${TAG}" >> "$GITHUB_STEP_SUMMARY"
