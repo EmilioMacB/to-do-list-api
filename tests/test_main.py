@@ -161,3 +161,8 @@ def test_repository_rereads_secret_after_connection_error(monkeypatch):
 
     # Tras un OperationalError se descarta el secret cacheado → se lee de nuevo
     assert secrets.calls == 2
+
+
+def test_demo_falla_a_proposito(client):
+    """DEMO para el reporte: este PR NO se debe mergear."""
+    assert client.get("/version").json() == {"version": "esto-no-es-la-version"}
