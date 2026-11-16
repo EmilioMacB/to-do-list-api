@@ -1,7 +1,7 @@
 # HANDOFF — estado vivo del proyecto
 
 > Leer esto completo al iniciar cualquier sesión/agente. Actualizarlo al terminar.
-> Última actualización: 2026-11-16 · Fases 1 y 2: **validadas en AWS** (apply ✅, endpoints ✅) · Siguiente: **Fase 3**
+> Última actualización: 2026-11-16 · Fases 1–3 ✅ (1 y 2 validadas en AWS) · Siguiente: **Fase 4**
 
 ## Estado actual (diagnóstico inicial)
 
@@ -34,7 +34,7 @@
 - [x] **Fase 2 — App** (smoke test local ✅ con repo falso y con repo real sin secret → 503): `src/main.py` (4 endpoints, Pydantic, `Depends(get_repository)` para inyectar un repo falso en tests), `src/db.py` (`TaskRepository`, secret cacheado y re-leído tras `OperationalError`, conexión por petición con `connect_timeout=3`, todo error → `DatabaseError`). `/health` → 200 healthy / 503 unhealthy. Errores de BD en `/tasks` → 503. Código TS eliminado.
   - Punto de enganche Fase 6: los `except DatabaseError` en `main.py` / `db.py::_connection` son donde se publicará la métrica de errores RDS.
   - Nota Fase 3: Starlette avisa que `TestClient` con `httpx` está deprecado → evaluar `httpx2` en `requirements-dev.txt`. Pytest necesita `pythonpath = ["src"]` (imports planos `from db import ...`).
-- [ ] **Fase 3 — Tests + CI:** ≥ 3 tests (BD mockeada), `ci.yml` en `pull_request`, branch protection en `main` con status check requerido. 🔁 *Conversación nueva al terminar.*
+- [x] **Fase 3 — Tests + CI:** 15 tests en `tests/test_main.py` (repo falso vía `dependency_overrides` en `tests/conftest.py`; tests de `db.py` con boto3/psycopg reemplazados por `monkeypatch`). `requirements-dev.txt` (pytest + `httpx2`, que quita el warning de Starlette), `pyproject.toml` (`pythonpath=["src"]`). `.github/workflows/ci.yml`: `pull_request` a main + `workflow_dispatch`, Python 3.12, job/check **`tests`**. Branch protection **estricta** (`enforce_admins=true`, PR obligatorio con 0 aprobaciones, check `tests` requerido) → **ya no se puede pushear directo a main: todo cambio entra por PR**, incluido el HANDOFF.
 - [ ] **Fase 4 — Workflows de infra:** `provision.yml` / `destroy.yml` con `workflow_dispatch`, credenciales del lab en Secrets.
 - [ ] **Fase 5 — CD:** `release.yml` (tag `v*.*.*` → zip → Release) y `deploy.yml` (`release: published` → EC2 descarga, actualiza `APP_VERSION`, `systemctl restart`). 🔁 *Conversación nueva al terminar.*
 - [ ] **Fase 6 — Observabilidad:** métrica errores RDS + métrica propia en la app; 3 alarmas + SNS + dashboard en Terraform; `health-check.yml` (cron `*/5`). Probar deteniendo RDS. 🔁 *Conversación nueva al terminar.*
@@ -47,7 +47,9 @@
 - [ ] (Opcional) borrar `terraform/terraform.tfstate*` locales viejos (state vacío, ya destruido).
 - [ ] GitHub Secrets: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` (renovar cada sesión del lab).
 - [ ] Confirmar suscripción SNS en el correo.
-- [ ] Activar branch protection en GitHub (o hacerlo con `gh api`).
+- [x] Branch protection activada con `gh api` (2026-11-16).
+- [ ] Captura de evidencia: PR de demo con test roto mostrando "Merging is blocked" (luego cerrarlo sin merge).
+- [ ] VS Code: seleccionar el intérprete `.venv/bin/python` (Cmd+Shift+P → "Python: Select Interpreter") para que no marque pytest como no instalado.
 
 ## Bitácora
 - 2026-11-15 — Diagnóstico inicial y creación de `CLAUDE.md`, `HANDOFF.md`, `docs/ENUNCIADO.md`.
@@ -57,8 +59,10 @@
 
 - 2026-11-16 — Prueba real en AWS: bootstrap S3 + init + apply (9 recursos, RDS ~5 min). Al terminar el apply la API ya respondía: `/health` 200 `database: OK`, `/version` = `d53aa0b` (commit, aún sin tags), POST /tasks 201, validación 422, GET /tasks 200. Agregado `tfplan`/`*.tfplan` a `terraform/.gitignore` (el plan guardado contiene el password).
 
+- 2026-11-16 — Fase 3: tests (15 ✅ local) + `ci.yml` + branch protection. Entró por PR `test/ci-pruebas`.
+
 ## Siguiente paso exacto
 1. ✅ Commits `13077ad` (infra Fase 1) y `d53aa0b` (feat Fase 2) en `main`, pusheados. **Commits sin Co-Authored-By ni atribución a Claude** (preferencia del usuario).
 2. ✅ Apply de prueba OK (2026-11-16). La infra puede seguir arriba mientras dure el lab; si se apaga, `terraform apply` la recrea.
-3. Pendiente commit: `terraform/.gitignore` + `HANDOFF.md`/`CLAUDE.md`.
-4. **Fase 3** — tests + CI + branch protection.
+3. ✅ Fase 3 (ver bitácora). Correr tests local: `.venv/bin/pytest`.
+4. **Fase 4** — `provision.yml` / `destroy.yml` (en conversación nueva). Recordar: trabajar en rama + PR (main protegida).
