@@ -1,0 +1,6 @@
+[tool.pytest.ini_options]
+# La app usa imports planos (`from db import ...`) porque en la EC2 corre
+# desde /opt/todo-api/src. Con esto pytest encuentra esos módulos igual.
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-v"
