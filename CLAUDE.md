@@ -7,7 +7,7 @@ Este archivo se carga en cada sesión. Mantenerlo corto. El estado vivo está en
 2. **Trabajar una sola fase** del plan a la vez (ver HANDOFF). No adelantar fases.
 3. **Al terminar o pausar:** actualizar `HANDOFF.md` (estado, decisiones, bloqueos, siguiente paso exacto) antes de cerrar.
 4. Si se termina una fase grande, recomendar al usuario **abrir una conversación nueva** (contexto fresco) — el HANDOFF es lo que hereda el siguiente agente.
-5. Idioma: español. Commits con Conventional Commits en español (`feat:`, `fix:`, `ci:`, `infra:`, `docs:`, `test:`).
+5. Idioma: español. Commits con Conventional Commits en español (`feat:`, `fix:`, `ci:`, `infra:`, `docs:`, `test:`). **Sin `Co-Authored-By` ni atribución a Claude** en commits ni PRs: el único autor es el usuario.
 6. No hacer commit/push ni correr `terraform apply/destroy` sin pedirlo al usuario.
 
 ## Stack

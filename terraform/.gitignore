@@ -10,4 +10,8 @@
 *.pem
 crash.log
 
+# Planes guardados (`terraform plan -out=...`): también incluyen valores sensibles
+tfplan
+*.tfplan
+
 # Nota: .terraform.lock.hcl SÍ se versiona (fija las versiones exactas de los providers)

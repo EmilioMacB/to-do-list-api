@@ -1,7 +1,7 @@
 # HANDOFF — estado vivo del proyecto
 
 > Leer esto completo al iniciar cualquier sesión/agente. Actualizarlo al terminar.
-> Última actualización: 2026-11-15 · Fases 1 y 2: **código listo** (sin probar en AWS) · Siguiente: **commits → apply de prueba (con lab) → Fase 3**
+> Última actualización: 2026-11-16 · Fases 1 y 2: **validadas en AWS** (apply ✅, endpoints ✅) · Siguiente: **Fase 3**
 
 ## Estado actual (diagnóstico inicial)
 
@@ -41,8 +41,9 @@
 - [ ] **Fase 7 — Evidencia y entrega:** README, capturas (tfstate S3, dashboard, alarma en ALARM, runs de Actions), diagrama, reporte PDF ≤ 2 hojas.
 
 ## Acciones manuales del usuario (fuera del código)
-- [ ] Iniciar Learner Lab y pegar credenciales en `~/.aws/credentials` (las locales están expiradas).
-- [ ] `./scripts/bootstrap-backend.sh` (una vez) y luego `terraform init -reconfigure -backend-config="bucket=todo-api-tfstate-<ACCOUNT_ID>"`.
+- [ ] En cada sesión del lab: pegar credenciales en `~/.aws/credentials` (reemplazar `[default]` completo) y verificar con `aws sts get-caller-identity`.
+- [x] Bootstrap hecho: bucket `todo-api-tfstate-839144413811` (cuenta lab `839144413811`); `terraform init -reconfigure -backend-config="bucket=todo-api-tfstate-839144413811"` ✅. State en `s3://.../todo-list-api/terraform.tfstate`.
+- [ ] Limpiar el bloque `[profile eb-cli]` de `~/.aws/config` (tiene llaves viejas en texto plano).
 - [ ] (Opcional) borrar `terraform/terraform.tfstate*` locales viejos (state vacío, ya destruido).
 - [ ] GitHub Secrets: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` (renovar cada sesión del lab).
 - [ ] Confirmar suscripción SNS en el correo.
@@ -54,7 +55,10 @@
 
 - 2026-11-15 — Fase 2: app FastAPI en `src/`, TS eliminado, `.venv/` local creado.
 
+- 2026-11-16 — Prueba real en AWS: bootstrap S3 + init + apply (9 recursos, RDS ~5 min). Al terminar el apply la API ya respondía: `/health` 200 `database: OK`, `/version` = `d53aa0b` (commit, aún sin tags), POST /tasks 201, validación 422, GET /tasks 200. Agregado `tfplan`/`*.tfplan` a `terraform/.gitignore` (el plan guardado contiene el password).
+
 ## Siguiente paso exacto
-1. Commits separados de Fase 1 (`infra:`) y Fase 2 (`feat:`) + push a `main` (aún sin branch protection).
-2. Con lab activo (credenciales en `~/.aws/credentials`, NUNCA en el chat): bootstrap S3 → `terraform init` → `terraform apply` → esperar ~10 min → `curl <api_url>/health` (esperado `database: OK`), probar POST/GET /tasks. Si falla: SSH con `terraform output -raw ssh_private_key` y revisar `/var/log/cloud-init-output.log` y `journalctl -u todo-api`.
-3. Fase 3 (en conversación nueva si el contexto ya pesa).
+1. ✅ Commits `13077ad` (infra Fase 1) y `d53aa0b` (feat Fase 2) en `main`, pusheados. **Commits sin Co-Authored-By ni atribución a Claude** (preferencia del usuario).
+2. ✅ Apply de prueba OK (2026-11-16). La infra puede seguir arriba mientras dure el lab; si se apaga, `terraform apply` la recrea.
+3. Pendiente commit: `terraform/.gitignore` + `HANDOFF.md`/`CLAUDE.md`.
+4. **Fase 3** — tests + CI + branch protection.
