@@ -1,0 +1,6 @@
+# Dependencias para desarrollo y CI (NO se instalan en la EC2).
+# Incluye las de producción para que los tests usen exactamente las mismas versiones.
+-r src/requirements.txt
+
+pytest==9.2.0
+httpx2==2.16.2  # cliente HTTP que usa TestClient (Starlette depreca el `httpx` original)
