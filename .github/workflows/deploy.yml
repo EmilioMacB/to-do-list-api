@@ -1,0 +1,161 @@
+# Deploy: cuando se publica un GitHub Release, la EC2 descarga el zip del
+# release, actualiza APP_VERSION y reinicia el servicio. Sin SSH: los comandos
+# llegan a la EC2 por SSM Run Command (el agente SSM viene en la AMI de Ubuntu y
+# LabInstanceProfile le da permisos).
+#
+# También se puede correr a mano (Run workflow) para re-desplegar un tag existente.
+name: Deploy
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag del release a desplegar (ej. v1.0.0)"
+        required: true
+
+# Nunca dos deploys a la vez sobre la misma EC2; el segundo espera su turno.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+  # Viene del evento release o del input manual. Se pasa como variable de
+  # ambiente (no se interpola dentro de `run:`) para evitar inyección de comandos.
+  TAG: ${{ github.event.release.tag_name || inputs.tag }}
+  INSTANCE_NAME: todo-api-server # tag Name que pone Terraform a la EC2
+  APP_PORT: "8000"
+
+jobs:
+  deploy:
+    name: desplegar en EC2
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Validar el tag
+        run: |
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Tag inválido: '$TAG' (formato esperado v#.#.#)"
+            exit 1
+          fi
+          ZIP="todo-api-${TAG}.zip"
+          echo "ASSET_URL=${{ github.server_url }}/${{ github.repository }}/releases/download/${TAG}/${ZIP}" >> "$GITHUB_ENV"
+
+      - name: Verificar que el release tiene el zip
+        run: curl -fsSIL --max-time 15 "$ASSET_URL" -o /dev/null && echo "OK: $ASSET_URL"
+
+      - name: Descargar el código (para scripts/deploy-remote.sh)
+        uses: actions/checkout@v5
+
+      - name: Verificar credenciales del Learner Lab
+        run: |
+          aws sts get-caller-identity --query Arn --output text || {
+            echo "::error::Credenciales inválidas o expiradas. Actualiza los 3 GitHub Secrets AWS_*."
+            exit 1
+          }
+
+      - name: Buscar la EC2 por su tag Name
+        # Así no dependemos del tfstate: basta con que la instancia exista y esté corriendo.
+        run: |
+          read -r INSTANCE_ID PUBLIC_IP < <(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=${INSTANCE_NAME}" "Name=instance-state-name,Values=running" \
+            --query 'Reservations[0].Instances[0].[InstanceId,PublicIpAddress]' --output text)
+          if [ -z "$INSTANCE_ID" ] || [ "$INSTANCE_ID" = "None" ]; then
+            echo "::error::No hay una EC2 '${INSTANCE_NAME}' corriendo. Corre el workflow Provision primero."
+            exit 1
+          fi
+          echo "INSTANCE_ID=${INSTANCE_ID}" >> "$GITHUB_ENV"
+          echo "API_URL=http://${PUBLIC_IP}:${APP_PORT}" >> "$GITHUB_ENV"
+          echo "EC2: ${INSTANCE_ID} (${PUBLIC_IP})"
+
+      - name: Esperar a que la EC2 esté registrada en SSM
+        run: |
+          for i in $(seq 1 30); do
+            PING=$(aws ssm describe-instance-information \
+              --filters "Key=InstanceIds,Values=${INSTANCE_ID}" \
+              --query 'InstanceInformationList[0].PingStatus' --output text)
+            [ "$PING" = "Online" ] && { echo "Agente SSM: Online"; exit 0; }
+            echo "Intento ${i}/30: agente SSM = ${PING}, reintentando en 10 s..."
+            sleep 10
+          done
+          echo "::error::El agente SSM de la EC2 no está Online."
+          exit 1
+
+      - name: Enviar el deploy a la EC2 (SSM Run Command)
+        # El script viaja en base64 para que ninguna comilla o $ se rompa por el camino.
+        # En la EC2 se decodifica y se ejecuta con bash, con TAG y ASSET_URL como variables.
+        run: |
+          SCRIPT_B64=$(base64 -w0 scripts/deploy-remote.sh)
+          jq -n --arg b64 "$SCRIPT_B64" --arg tag "$TAG" --arg url "$ASSET_URL" '{
+            commands: [
+              "echo \($b64) | base64 -d > /tmp/todo-api-deploy.sh",
+              "TAG=\($tag | @sh) ASSET_URL=\($url | @sh) bash /tmp/todo-api-deploy.sh"
+            ],
+            executionTimeout: ["600"]
+          }' > ssm-params.json
+
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name AWS-RunShellScript \
+            --comment "deploy ${TAG} (run ${{ github.run_id }})" \
+            --parameters file://ssm-params.json \
+            --query Command.CommandId --output text)
+          echo "COMMAND_ID=${COMMAND_ID}" >> "$GITHUB_ENV"
+          echo "SSM CommandId: ${COMMAND_ID}"
+
+      - name: Esperar el resultado en la EC2
+        run: |
+          STATUS=Pending
+          for i in $(seq 1 90); do
+            STATUS=$(aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" \
+              --query Status --output text 2>/dev/null || echo Pending)
+            case "$STATUS" in Success|Failed|Cancelled|TimedOut) break ;; esac
+            sleep 5
+          done
+          echo "----- salida en la EC2 -----"
+          aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" \
+            --query StandardOutputContent --output text
+          echo "----- errores en la EC2 -----"
+          aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID" \
+            --query StandardErrorContent --output text
+          if [ "$STATUS" != "Success" ]; then
+            echo "::error::El deploy en la EC2 terminó con estado ${STATUS}"
+            exit 1
+          fi
+
+      - name: Validar GET /version desde internet
+        run: |
+          for i in $(seq 1 12); do
+            BODY=$(curl -fsS --max-time 5 "${API_URL}/version" || true)
+            echo "Intento ${i}: ${BODY}"
+            if echo "$BODY" | grep -q "\"${TAG}\""; then
+              echo "VERSION_BODY=${BODY}" >> "$GITHUB_ENV"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::${API_URL}/version no devolvió ${TAG}"
+          exit 1
+
+      - name: Resumen
+        if: always()
+        run: |
+          {
+            echo "## Deploy ${TAG}"
+            echo ""
+            echo "| Campo | Valor |"
+            echo "|---|---|"
+            echo "| EC2 | ${INSTANCE_ID:-n/d} |"
+            echo "| SSM CommandId | ${COMMAND_ID:-n/d} |"
+            echo "| GET /version | \`${VERSION_BODY:-n/d}\` |"
+            echo "| API | ${API_URL:-n/d} |"
+          } >> "$GITHUB_STEP_SUMMARY"
