@@ -1,2 +1,13 @@
-*.terraform*
-terraform.tfstate*
+# Directorio de providers/módulos descargados
+.terraform/
+
+# State: vive en S3, NUNCA en el repo (contiene el password de RDS en texto plano)
+*.tfstate
+*.tfstate.*
+
+# Variables locales y llaves
+*.tfvars
+*.pem
+crash.log
+
+# Nota: .terraform.lock.hcl SÍ se versiona (fija las versiones exactas de los providers)

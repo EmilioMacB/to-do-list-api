@@ -1,0 +1,60 @@
+#!/bin/bash
+# =============================================================================
+# user_data: se ejecuta UNA vez como root cuando la EC2 arranca por primera vez.
+# Log completo en la instancia: /var/log/cloud-init-output.log
+# Nota: es una plantilla de Terraform (templatefile). Las variables
+# repo_url, app_port, aws_region y secret_name las inyecta Terraform.
+# =============================================================================
+set -euxo pipefail
+
+APP_DIR=/opt/todo-api        # código (el deploy lo reemplaza con cada release)
+VENV_DIR=/opt/todo-api-venv  # entorno virtual (fuera de APP_DIR para sobrevivir a los deploys)
+ENV_FILE=/etc/todo-api.env   # configuración no secreta que lee systemd
+
+# 1. Dependencias del sistema
+apt-get update -y
+apt-get install -y git python3-venv python3-pip unzip curl
+
+# 2. Clonar el repositorio
+git clone "${repo_url}" "$APP_DIR"
+
+# 3. Entorno virtual + dependencias de Python
+python3 -m venv "$VENV_DIR"
+"$VENV_DIR/bin/pip" install --upgrade pip
+"$VENV_DIR/bin/pip" install -r "$APP_DIR/src/requirements.txt"
+
+# 4. Configuración de la app. SIN credenciales: solo el NOMBRE del secret.
+#    La app pide el password a Secrets Manager en runtime usando el rol de la EC2.
+APP_VERSION=$(git -C "$APP_DIR" describe --tags --always)
+cat > "$ENV_FILE" <<EOF
+APP_VERSION=$APP_VERSION
+APP_PORT=${app_port}
+DB_SECRET_NAME=${secret_name}
+AWS_REGION=${aws_region}
+AWS_DEFAULT_REGION=${aws_region}
+EOF
+chmod 644 "$ENV_FILE"
+chown -R ubuntu:ubuntu "$APP_DIR" "$VENV_DIR"
+
+# 5. Servicio systemd: arranca solo, se reinicia si falla y permite
+#    `systemctl restart todo-api` desde el workflow de deploy.
+cat > /etc/systemd/system/todo-api.service <<EOF
+[Unit]
+Description=To-Do List API (FastAPI)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=$APP_DIR/src
+EnvironmentFile=$ENV_FILE
+ExecStart=$VENV_DIR/bin/uvicorn main:app --host 0.0.0.0 --port ${app_port}
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable --now todo-api
