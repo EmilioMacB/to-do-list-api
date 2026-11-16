@@ -6,18 +6,37 @@ Docs interactivas: http://localhost:8000/docs
 
 import logging
 import os
+import time
 from datetime import datetime, timezone
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+import metrics
 from db import DatabaseError, TaskRepository
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 app = FastAPI(title="To-Do List API", description="Práctica 4 — CI/CD + Observabilidad")
+
+
+# --- Métrica propia #2: latencia de cada petición -----------------------------
+# Un middleware envuelve TODAS las peticiones: mide desde que llega hasta que
+# sale la respuesta y publica el tiempo en CloudWatch (RequestLatency, en ms).
+# Refleja lo que vive el usuario: si RDS o la EC2 se ponen lentas, sube.
+
+
+@app.middleware("http")
+async def measure_latency(request: Request, call_next):
+    start = time.perf_counter()
+    try:
+        return await call_next(request)
+    finally:
+        # `finally`: se mide incluso si el endpoint lanzó una excepción
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        metrics.record_request_latency(elapsed_ms)
 
 # --- Dependencias ------------------------------------------------------------
 # FastAPI inyecta el repositorio en cada endpoint. En los tests se reemplaza

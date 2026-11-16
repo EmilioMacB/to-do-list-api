@@ -9,7 +9,12 @@ import pytest
 from botocore.exceptions import ClientError
 
 import db
+import metrics
 from db import DatabaseError, TaskRepository
+
+# Referencia a la función REAL, tomada antes de que el fixture autouse
+# `recorded_metrics` la reemplace (se usa en los tests de metrics.py).
+REAL_PUT_METRIC = metrics.put_metric
 
 # --- /health ------------------------------------------------------------------
 
@@ -161,3 +166,51 @@ def test_repository_rereads_secret_after_connection_error(monkeypatch):
 
     # Tras un OperationalError se descarta el secret cacheado → se lee de nuevo
     assert secrets.calls == 2
+
+
+def test_repository_publishes_database_error_metric(monkeypatch, recorded_metrics):
+    monkeypatch.setattr(db.boto3, "client", lambda *_a, **_k: _FakeSecretsClient())
+    monkeypatch.setenv("DB_SECRET_NAME", "todo-api/db-credentials")
+
+    def connect_fails(**_kwargs):
+        raise psycopg.OperationalError("connection refused")
+
+    monkeypatch.setattr(db.psycopg, "connect", connect_fails)
+
+    with pytest.raises(DatabaseError):
+        TaskRepository().list_tasks()
+
+    # Cada operación fallida en RDS suma 1 a DatabaseErrors
+    assert recorded_metrics == [(metrics.DATABASE_ERRORS, 1, "Count")]
+
+
+# --- Métricas propias (metrics.py) -------------------------------------------
+
+
+def test_every_request_publishes_latency_metric(client, recorded_metrics):
+    client.get("/version")
+
+    assert len(recorded_metrics) == 1
+    name, value, unit = recorded_metrics[0]
+    assert (name, unit) == (metrics.REQUEST_LATENCY, "Milliseconds")
+    assert value >= 0
+
+
+def test_metrics_can_be_disabled_with_env_var(monkeypatch):
+    submitted = []
+    monkeypatch.setattr(metrics._executor, "submit", lambda *args: submitted.append(args))
+    monkeypatch.setenv("METRICS_ENABLED", "false")
+
+    REAL_PUT_METRIC(metrics.REQUEST_LATENCY, 12.5, "Milliseconds")
+
+    assert submitted == []  # no se intentó hablar con CloudWatch
+
+
+def test_metric_publish_failure_never_breaks_the_app(monkeypatch):
+    class _BrokenCloudWatch:
+        def put_metric_data(self, **_kwargs):
+            raise ClientError({"Error": {"Code": "AccessDenied"}}, "PutMetricData")
+
+    monkeypatch.setattr(metrics, "_client", _BrokenCloudWatch())
+
+    metrics._send(metrics.DATABASE_ERRORS, 1, "Count")  # no debe lanzar excepción

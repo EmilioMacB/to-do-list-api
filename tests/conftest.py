@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+import metrics
 from db import DatabaseError
 from main import app, get_repository
 
@@ -47,6 +48,20 @@ class FakeRepository:
 
     def ping(self) -> None:
         self._check()
+
+
+@pytest.fixture(autouse=True)
+def recorded_metrics(monkeypatch) -> list[tuple[str, float, str]]:
+    """En TODOS los tests (autouse): las métricas no van a CloudWatch.
+
+    Se reemplaza metrics.put_metric por una función que solo anota cada dato
+    en una lista; así los tests pueden verificar QUÉ se habría publicado.
+    """
+    recorded: list[tuple[str, float, str]] = []
+    monkeypatch.setattr(
+        metrics, "put_metric", lambda name, value, unit="Count": recorded.append((name, value, unit))
+    )
+    return recorded
 
 
 @pytest.fixture

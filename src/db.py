@@ -16,6 +16,8 @@ import psycopg
 from botocore.exceptions import BotoCoreError, ClientError
 from psycopg.rows import dict_row
 
+import metrics
+
 logger = logging.getLogger("todo-api.db")
 
 CONNECT_TIMEOUT_SECONDS = 3
@@ -91,6 +93,10 @@ class TaskRepository:
                 # volvemos a leer el secret (por si cambió el host o el password).
                 self._credentials = None
             logger.error("Error de base de datos: %s", exc)
+            # Métrica propia #1: cuenta cada lectura/escritura fallida en RDS.
+            # Está aquí (y no en main.py) porque es el único punto por donde
+            # pasan TODAS las operaciones: GET/POST /tasks y el ping de /health.
+            metrics.record_database_error()
             raise DatabaseError(str(exc)) from exc
 
     # -- Operaciones ---------------------------------------------------------
