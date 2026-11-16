@@ -1,7 +1,7 @@
 # HANDOFF — estado vivo del proyecto
 
 > Leer esto completo al iniciar cualquier sesión/agente. Actualizarlo al terminar.
-> Última actualización: 2026-11-16 · Fases 1–5 ✅ · Siguiente: **Fase 6**
+> Última actualización: 2026-11-16 · Fases 1–6 ✅ · Siguiente: **Fase 7 (evidencia y entrega)**
 
 ## Estado actual (diagnóstico inicial)
 
@@ -14,8 +14,8 @@
 | 5 | App completa | 🟡 | GET/POST /tasks con RDS ✅. **Faltan `/version` y `/health`**. Usa `tarea` en vez de `title`/`done`. Puerto 3000 (enunciado usa 8000). |
 | 6 | ≥ 3 tests en CI + bloqueo de merge | ❌ | Sin tests, sin `ci.yml`, sin branch protection. App no exporta `app` (difícil de testear). |
 | 7 | Release por tag + deploy en EC2 | ❌ | Además, la app corre con `nohup` → no hay forma limpia de reiniciarla (necesita systemd). |
-| 8 | 3 métricas + 3 alarmas + SNS | ❌ | — |
-| 9 | Dashboard + health-check cada 5 min | ❌ | — |
+| 8 | 3 métricas + 3 alarmas + SNS | ✅ | Fase 6: CPU EC2 (nativa), `TodoApi/DatabaseErrors`, `TodoApi/RequestLatency`; SNS correo confirmado. |
+| 9 | Dashboard + health-check cada 5 min | ✅ | `todo-api-dashboard` + `health-check.yml`. Falta solo la captura (Fase 7). |
 | 10 | `user_data` clona, instala y levanta | 🟡 | Existe y funciona, pero mete credenciales en texto plano y no usa systemd ni instance profile. |
 
 ## Decisiones
@@ -45,7 +45,17 @@
   - `deploy.yml`: `release: published` + `workflow_dispatch` (input `tag`, para re-desplegar). Busca la EC2 por tag `Name=todo-api-server` en estado running (no necesita tfstate) → espera agente SSM Online → manda `scripts/deploy-remote.sh` en base64 por **SSM Run Command** (`AWS-RunShellScript`, sin SSH) → espera el estado → valida `GET /version` == tag desde internet. `concurrency: deploy`.
   - `scripts/deploy-remote.sh` (corre como root en la EC2): descarga zip público del release → unzip → `pip install -r` en el venv → mueve `/opt/todo-api` a `/opt/todo-api.prev` y pone el nuevo → `sed APP_VERSION` en `/etc/todo-api.env` → `systemctl restart todo-api` → verifica `/version` local; si falla, **rollback** al `.prev`.
   - 🔁 *Conversación nueva al terminar.*
-- [ ] **Fase 6 — Observabilidad:** métrica errores RDS + métrica propia en la app; 3 alarmas + SNS + dashboard en Terraform; `health-check.yml` (cron `*/5`). Probar deteniendo RDS. 🔁 *Conversación nueva al terminar.*
+- [x] **Fase 6 — Observabilidad** (PR #9, release `v1.1.0` desplegado, validado deteniendo RDS):
+  - `src/metrics.py`: `put_metric_data` en un `ThreadPoolExecutor` (no bloquea la petición; un fallo al publicar solo se loguea). Namespace `TodoApi`, **sin dimensiones** (así la alarma apunta a una sola serie). `METRICS_ENABLED=false` lo apaga; en tests un fixture autouse de `conftest.py` reemplaza `metrics.put_metric` y anota los datos (`recorded_metrics`).
+  - **`DatabaseErrors`** (Count): se publica en el `except` de `db.py::_connection` → cuenta lecturas, escrituras y el ping de `/health`.
+  - **`RequestLatency`** (ms): middleware HTTP en `main.py`. Métrica propuesta; justificación para el reporte: refleja la experiencia del usuario y detecta degradación por CPU o por RDS lenta. Línea base medida: promedio ~21 ms, p95 ~140 ms.
+  - Nativa: **`AWS/EC2 CPUUtilization`**.
+  - `alerting/alarms.json` (incluye campos `justificacion` y `accion` que Terraform mete en la descripción → llegan en el correo) y `alerting/cloudwatch-dashboard.json` (placeholders `${instance_id}`, `${region}`, `${account_id}`). `terraform/monitoring.tf` los lee. **Ojo:** alarms.json se lee con `file()` (no `templatefile`) porque las claves de `for_each` deben conocerse en el plan; el placeholder solo se reemplaza en `dimensions`.
+  - Alarmas: CPU > 80 % (3 de 3 × 5 min); RDS errores ≥ 1 (1 de 5 × 1 min, notBreaching); latencia p95 > 1000 ms (2 de 3 × 5 min, notBreaching). `alarm_actions` + `ok_actions` → SNS `todo-api-alerts`.
+  - Correo: `var.alert_email` (default `""` → sin suscripción). Va en el GitHub Secret **`ALERT_EMAIL`** → `TF_VAR_alert_email` en `provision.yml`. **Tras cada destroy/provision hay que volver a confirmar la suscripción en el correo.**
+  - `health-check.yml`: cron `*/5` + manual, 3 intentos; si las credenciales vencieron o no hay EC2 corriendo → warning y sale sin fallar.
+  - **Resultado de la prueba (para la pregunta 3 del reporte):** RDS detenida a las 16:30 (hora local) → `DatabaseErrors` 7-10/min → `todo-api-rds-errores` en ALARM a las 16:31 (correo recibido) → health-check manual en `failure`. Cuando RDS terminó de detenerse, cada petición esperó el `connect_timeout` de 3 s → p95 de latencia 138 → ~3100 ms → `todo-api-latencia-alta` en ALARM a las 16:36. RDS arrancada → `/health` healthy, `rds-errores` volvió a OK a las 16:50.
+  - 🔁 *Conversación nueva al terminar.*
 - [ ] **Fase 7 — Evidencia y entrega:** README, capturas (tfstate S3, dashboard, alarma en ALARM, runs de Actions), diagrama, reporte PDF ≤ 2 hojas.
 
 ## Acciones manuales del usuario (fuera del código)
@@ -54,7 +64,9 @@
 - [ ] Limpiar el bloque `[profile eb-cli]` de `~/.aws/config` (tiene llaves viejas en texto plano).
 - [ ] (Opcional) borrar `terraform/terraform.tfstate*` locales viejos (state vacío, ya destruido).
 - [x] GitHub Secrets cargados (2026-11-16). **Renovar en cada sesión del lab** con el loop de `gh secret set` (bitácora Fase 4).
-- [ ] Confirmar suscripción SNS en el correo.
+- [x] Confirmar suscripción SNS en el correo (2026-11-16). Repetir tras cada destroy/provision.
+- [x] Secret `ALERT_EMAIL` creado (2026-11-16).
+- [x] Capturas de dashboard y alarma en ALARM tomadas (2026-11-16).
 - [x] Crear PAT fine-grained (repo `to-do-list-api`, Contents: Read and write) y guardarlo como secret `RELEASE_TOKEN` (no expira con el lab; sí con la fecha que le pongas al PAT).
 - [x] Branch protection activada con `gh api` (2026-11-16).
 - [x] Captura de evidencia: PR #2 (test roto → `BLOCKED`) capturado y cerrado sin merge.
@@ -75,10 +87,13 @@
 - 2026-11-16 — Fase 5 validada: PR #6 mergeado; tag `v1.0.0` → Release OK pero Deploy no corrió (YAML inválido); fix en PR #7; tag `v1.0.1` → Release (9 s) → Deploy por evento `release` (20 s) → `/version` = `v1.0.1`. Infra sigue **arriba** (EC2 `i-0defde2d53f691d9c`, IP 44.201.213.129).
 - (Histórico) Infra de la prueba (EC2 `i-063b2068f517322fb`, RDS `todo-api-db`) quedó **arriba** en el lab; se apaga sola con la sesión. Al reanudar el lab, EC2/RDS arrancan solas (la IP pública cambia); si se borraron, `terraform apply`.
 
+- 2026-11-16 — Fase 6: PR #9 mergeado → Provision (6 recursos añadidos, EC2/RDS sin cambios, IP igual) → tag `v1.1.0` → Deploy OK. Prueba deteniendo RDS exitosa (ver Fase 6). Infra **arriba** (EC2 `i-0defde2d53f691d9c`, IP 44.201.213.129, RDS arrancada).
+
 ## Siguiente paso exacto
 1. ✅ Commits `13077ad` (infra Fase 1) y `d53aa0b` (feat Fase 2) en `main`, pusheados. **Commits sin Co-Authored-By ni atribución a Claude** (preferencia del usuario).
 2. ✅ Apply de prueba OK (2026-11-16). La infra puede seguir arriba mientras dure el lab; si se apaga, `terraform apply` la recrea.
 3. ✅ Fase 3 (ver bitácora). Correr tests local: `.venv/bin/pytest`.
 4. ✅ Fase 4 (ver bitácora). Pendiente del usuario: capturas de los 3 runs en Actions para el reporte.
 5. ✅ Fase 5 (ver bitácora). Para publicar una versión: `git switch main && git pull && git tag vX.Y.Z && git push origin vX.Y.Z`.
-6. **Fase 6 — Observabilidad** (conversación nueva). Puntos de enganche de la métrica de errores RDS: los `except DatabaseError` en `src/main.py` / `src/db.py::_connection`. El usuario solo quiere capturas que pida la rúbrica (dashboard, alarma en ALARM, tfstate S3). Nota: la EC2 actual usa `user_data` viejo; si Fase 6 toca `user_data`/EC2, Terraform la recreará (nueva IP) y el código vendrá de `git clone` de main (versión = hash) hasta el siguiente tag.
+6. ✅ Fase 6 (ver bitácora). Verificar en la pestaña Actions que el cron de `health-check.yml` ya corre solo (los `schedule` nuevos tardan en arrancar la primera vez).
+7. **Fase 7 — Evidencia y entrega** (conversación nueva): README (cómo correr, crear y destruir la infra), diagrama, reporte PDF ≤ 2 hojas (justificaciones de umbrales en `alerting/alarms.json`), captura del tfstate en S3. Nota anterior de Fase 6: Puntos de enganche de la métrica de errores RDS: los `except DatabaseError` en `src/main.py` / `src/db.py::_connection`. El usuario solo quiere capturas que pida la rúbrica (dashboard, alarma en ALARM, tfstate S3). Nota: la EC2 actual usa `user_data` viejo; si Fase 6 toca `user_data`/EC2, Terraform la recreará (nueva IP) y el código vendrá de `git clone` de main (versión = hash) hasta el siguiente tag.
