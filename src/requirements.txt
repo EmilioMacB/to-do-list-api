@@ -1,0 +1,4 @@
+fastapi==0.163.1
+uvicorn==0.54.0
+boto3==1.44.3
+psycopg[binary]==3.3.9
