@@ -1,0 +1,87 @@
+# Health check: monitor externo que consulta GET /health cada 5 minutos.
+# Complementa a CloudWatch: las alarmas miden la app "desde adentro"; este
+# workflow la ve "desde afuera", como un usuario en internet.
+#
+# Nota: GitHub ejecuta los `schedule` solo desde la rama main, y en horas de
+# mucha carga puede retrasarlos algunos minutos (5 min es el mínimo permitido).
+name: Health check
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+# Si una corrida se atrasa, no tiene sentido encolar otra: la nueva reemplaza a la vieja
+concurrency:
+  group: health-check
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+  INSTANCE_NAME: todo-api-server
+  APP_PORT: "8000"
+
+jobs:
+  health:
+    name: GET /health
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Buscar la API (EC2 por tag Name)
+        # La IP pública cambia cada vez que se recrea la EC2, por eso se busca en
+        # cada corrida. Si el Learner Lab está apagado (credenciales vencidas o
+        # sin EC2 corriendo) no hay nada que monitorear: se avisa y se termina
+        # sin fallar, para no llenar el historial de falsas alarmas.
+        run: |
+          if ! aws sts get-caller-identity > /dev/null 2>&1; then
+            echo "::warning::Credenciales AWS vencidas (Learner Lab apagado). Se omite el chequeo."
+            echo "SKIP=true" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          PUBLIC_IP=$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=${INSTANCE_NAME}" "Name=instance-state-name,Values=running" \
+            --query 'Reservations[0].Instances[0].PublicIpAddress' --output text)
+          if [ -z "$PUBLIC_IP" ] || [ "$PUBLIC_IP" = "None" ]; then
+            echo "::warning::No hay una EC2 '${INSTANCE_NAME}' corriendo. Se omite el chequeo."
+            echo "SKIP=true" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          echo "API_URL=http://${PUBLIC_IP}:${APP_PORT}" >> "$GITHUB_ENV"
+
+      - name: Consultar /health
+        if: env.SKIP != 'true'
+        # 3 intentos separados por 10 s: un solo timeout de red no debe marcar caída.
+        # /health responde 200 solo si la BD contesta; 503 si RDS no responde.
+        run: |
+          for i in 1 2 3; do
+            CODE=$(curl -sS -o body.json -w '%{http_code}' --max-time 10 "${API_URL}/health" || echo 000)
+            echo "Intento ${i}: HTTP ${CODE} $(cat body.json 2>/dev/null)"
+            if [ "$CODE" = "200" ]; then
+              echo "RESULT=✅ healthy" >> "$GITHUB_ENV"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "RESULT=❌ unhealthy (HTTP ${CODE})" >> "$GITHUB_ENV"
+          echo "::error::${API_URL}/health no respondió 200 en 3 intentos (último: HTTP ${CODE})."
+          exit 1
+
+      - name: Resumen
+        if: always() && env.SKIP != 'true'
+        run: |
+          {
+            echo "## Health check"
+            echo ""
+            echo "| Campo | Valor |"
+            echo "|---|---|"
+            echo "| API | ${API_URL:-n/d} |"
+            echo "| Resultado | ${RESULT:-n/d} |"
+            echo "| Respuesta | \`$(cat body.json 2>/dev/null || echo n/d)\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
