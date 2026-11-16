@@ -1,0 +1,105 @@
+# Provision: crea (o actualiza) toda la infraestructura con Terraform.
+# Trigger 100 % manual (pestaña Actions → Provision → Run workflow).
+# Requiere los GitHub Secrets del Learner Lab: AWS_ACCESS_KEY_ID,
+# AWS_SECRET_ACCESS_KEY y AWS_SESSION_TOKEN (se renuevan en cada sesión del lab).
+name: Provision
+
+on:
+  workflow_dispatch:
+
+# Provision y Destroy comparten el mismo grupo: nunca corren a la vez sobre el
+# mismo state. cancel-in-progress=false → el segundo espera, no mata al primero
+# (cancelar un apply a la mitad puede dejar recursos huérfanos).
+concurrency:
+  group: terraform-state
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  # Terraform y la AWS CLI leen estas variables automáticamente
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+  TF_IN_AUTOMATION: "true" # salida de Terraform sin sugerencias interactivas
+
+jobs:
+  provision:
+    name: terraform apply
+    runs-on: ubuntu-latest
+    timeout-minutes: 30 # RDS tarda ~5-10 min en crearse
+
+    defaults:
+      run:
+        working-directory: terraform
+
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v5
+
+      - name: Verificar credenciales del Learner Lab
+        run: |
+          if ! ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text); then
+            echo "::error::Credenciales inválidas o expiradas. Actualiza los 3 GitHub Secrets con los datos de la sesión actual del Learner Lab."
+            exit 1
+          fi
+          # El bucket del backend se nombra con el Account ID (igual que bootstrap-backend.sh)
+          echo "TF_STATE_BUCKET=todo-api-tfstate-${ACCOUNT_ID}" >> "$GITHUB_ENV"
+
+      - name: Asegurar el bucket del backend (idempotente)
+        working-directory: .
+        run: ./scripts/bootstrap-backend.sh
+
+      - name: Instalar Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.16.1" # misma versión que en local
+          terraform_wrapper: false # para que `terraform output -raw` devuelva solo el valor
+
+      - name: terraform init (backend S3 remoto)
+        run: terraform init -input=false -backend-config="bucket=${TF_STATE_BUCKET}"
+
+      - name: terraform validate
+        run: terraform validate
+
+      - name: terraform plan
+        # El plan se guarda en un archivo efímero del runner (nunca se sube como artefacto:
+        # contiene el password de RDS).
+        run: terraform plan -input=false -out=tfplan
+
+      - name: terraform apply
+        # Aplica exactamente el plan revisado arriba
+        run: terraform apply -input=false tfplan
+
+      - name: Esperar a que la API responda /health
+        # user_data sigue instalando la app después del apply; damos hasta ~8 min.
+        run: |
+          API_URL=$(terraform output -raw api_url)
+          echo "API_URL=${API_URL}" >> "$GITHUB_ENV"
+          for i in $(seq 1 48); do
+            if curl -fsS --max-time 5 "${API_URL}/health"; then
+              echo ""
+              echo "API saludable en ${API_URL}"
+              exit 0
+            fi
+            echo "Intento ${i}/48: la API aún no responde, reintentando en 10 s..."
+            sleep 10
+          done
+          echo "::error::La API no respondió /health a tiempo. Revisa los logs de la EC2 (cloud-init / journalctl -u todo-api)."
+          exit 1
+
+      - name: Resumen
+        if: always()
+        run: |
+          {
+            echo "## Infraestructura aprovisionada"
+            echo ""
+            echo "| Output | Valor |"
+            echo "|---|---|"
+            echo "| API | ${API_URL:-n/d} |"
+            echo "| instance_id | $(terraform output -raw instance_id 2>/dev/null || echo n/d) |"
+            echo "| rds_identifier | $(terraform output -raw rds_identifier 2>/dev/null || echo n/d) |"
+            echo "| tfstate | s3://${TF_STATE_BUCKET}/todo-list-api/terraform.tfstate |"
+          } >> "$GITHUB_STEP_SUMMARY"

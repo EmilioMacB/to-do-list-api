@@ -1,0 +1,74 @@
+# Destroy: elimina TODA la infraestructura gestionada por Terraform.
+# Trigger manual con confirmación: hay que escribir "destroy" para que corra.
+# El bucket S3 del backend NO se borra (vive fuera de este Terraform).
+name: Destroy
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Escribe "destroy" para confirmar el borrado de la infraestructura'
+        required: true
+        type: string
+
+# Mismo grupo que Provision: nunca se pisan sobre el mismo state.
+concurrency:
+  group: terraform-state
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+  TF_IN_AUTOMATION: "true"
+
+jobs:
+  destroy:
+    name: terraform destroy
+    # Guardia: si no escribiste exactamente "destroy", el job se salta (no borra nada)
+    if: inputs.confirm == 'destroy'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30 # borrar RDS tarda varios minutos
+
+    defaults:
+      run:
+        working-directory: terraform
+
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v5
+
+      - name: Verificar credenciales del Learner Lab
+        run: |
+          if ! ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text); then
+            echo "::error::Credenciales inválidas o expiradas. Actualiza los 3 GitHub Secrets con los datos de la sesión actual del Learner Lab."
+            exit 1
+          fi
+          echo "TF_STATE_BUCKET=todo-api-tfstate-${ACCOUNT_ID}" >> "$GITHUB_ENV"
+
+      - name: Instalar Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.16.1"
+          terraform_wrapper: false
+
+      - name: terraform init (backend S3 remoto)
+        # Necesita el state remoto para saber QUÉ borrar
+        run: terraform init -input=false -backend-config="bucket=${TF_STATE_BUCKET}"
+
+      - name: terraform destroy
+        run: terraform destroy -input=false -auto-approve
+
+      - name: Resumen
+        run: |
+          {
+            echo "## Infraestructura destruida"
+            echo ""
+            echo "Recursos restantes en el state: $(terraform state list | wc -l)"
+            echo ""
+            echo "El bucket \`${TF_STATE_BUCKET}\` (backend) se conserva a propósito."
+          } >> "$GITHUB_STEP_SUMMARY"
