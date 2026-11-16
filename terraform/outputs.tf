@@ -33,3 +33,13 @@ output "ssh_private_key" {
   value       = tls_private_key.ssh.private_key_pem
   sensitive   = true
 }
+
+output "sns_topic_arn" {
+  description = "Tópico SNS al que notifican las 3 alarmas"
+  value       = aws_sns_topic.alerts.arn
+}
+
+output "dashboard_url" {
+  description = "Dashboard de CloudWatch con las 3 métricas"
+  value       = "https://${var.aws_region}.console.aws.amazon.com/cloudwatch/home?region=${var.aws_region}#dashboards/dashboard/${aws_cloudwatch_dashboard.main.dashboard_name}"
+}

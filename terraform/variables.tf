@@ -63,3 +63,9 @@ variable "db_secret_name" {
   type        = string
   default     = "todo-api/db-credentials"
 }
+
+variable "alert_email" {
+  description = "Correo que recibe las alarmas vía SNS. Se pasa con TF_VAR_alert_email (GitHub Secret ALERT_EMAIL) o en terraform.tfvars (ignorado por git); nunca en el repo"
+  type        = string
+  default     = ""
+}
