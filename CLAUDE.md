@@ -9,6 +9,7 @@ Este archivo se carga en cada sesión. Mantenerlo corto. El estado vivo está en
 4. Si se termina una fase grande, recomendar al usuario **abrir una conversación nueva** (contexto fresco) — el HANDOFF es lo que hereda el siguiente agente.
 5. Idioma: español. Commits con Conventional Commits en español (`feat:`, `fix:`, `ci:`, `infra:`, `docs:`, `test:`). **Sin `Co-Authored-By` ni atribución a Claude** en commits ni PRs: el único autor es el usuario.
 6. No hacer commit/push ni correr `terraform apply/destroy` sin pedirlo al usuario.
+7. **`main` está protegida** (PR obligatorio + check `tests`, también para admin): todo cambio va en rama (`feat/…`, `ci/…`, `docs/…`) → PR → CI verde → merge. Nunca push directo a main.
 
 ## Stack
 - App: **Python 3.12 + FastAPI + psycopg 3 + boto3** en `src/` (`main.py` = HTTP, `db.py` = datos/secret). Venv local: `.venv/`. Correr: `cd src && ../.venv/bin/uvicorn main:app --reload --port 8000`.

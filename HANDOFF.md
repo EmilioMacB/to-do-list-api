@@ -48,8 +48,8 @@
 - [ ] GitHub Secrets: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN` (renovar cada sesión del lab).
 - [ ] Confirmar suscripción SNS en el correo.
 - [x] Branch protection activada con `gh api` (2026-11-16).
-- [ ] Captura de evidencia: PR de demo con test roto mostrando "Merging is blocked" (luego cerrarlo sin merge).
-- [ ] VS Code: seleccionar el intérprete `.venv/bin/python` (Cmd+Shift+P → "Python: Select Interpreter") para que no marque pytest como no instalado.
+- [x] Captura de evidencia: PR #2 (test roto → `BLOCKED`) capturado y cerrado sin merge.
+- [x] VS Code: el workspace abierto es `Sesion_5/` (padre del repo), por eso no detectaba `todo-app/.venv`. Se creó `Sesion_5/.vscode/settings.json` (fuera del repo) con `python.defaultInterpreterPath` apuntando al venv.
 
 ## Bitácora
 - 2026-11-15 — Diagnóstico inicial y creación de `CLAUDE.md`, `HANDOFF.md`, `docs/ENUNCIADO.md`.
@@ -59,7 +59,8 @@
 
 - 2026-11-16 — Prueba real en AWS: bootstrap S3 + init + apply (9 recursos, RDS ~5 min). Al terminar el apply la API ya respondía: `/health` 200 `database: OK`, `/version` = `d53aa0b` (commit, aún sin tags), POST /tasks 201, validación 422, GET /tasks 200. Agregado `tfplan`/`*.tfplan` a `terraform/.gitignore` (el plan guardado contiene el password).
 
-- 2026-11-16 — Fase 3: tests (15 ✅ local) + `ci.yml` + branch protection. Entró por PR `test/ci-pruebas`.
+- 2026-11-16 — Fase 3: tests (15 ✅ local y en Actions, 15 s) + `ci.yml` + branch protection. Entró por PR #1 (rebase-merge). PR #2 = demo de bloqueo, cerrado.
+- Infra de la prueba (EC2 `i-063b2068f517322fb`, RDS `todo-api-db`) quedó **arriba** en el lab; se apaga sola con la sesión. Al reanudar el lab, EC2/RDS arrancan solas (la IP pública cambia); si se borraron, `terraform apply`.
 
 ## Siguiente paso exacto
 1. ✅ Commits `13077ad` (infra Fase 1) y `d53aa0b` (feat Fase 2) en `main`, pusheados. **Commits sin Co-Authored-By ni atribución a Claude** (preferencia del usuario).
