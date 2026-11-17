@@ -1,7 +1,7 @@
 # HANDOFF — estado vivo del proyecto
 
 > Leer esto completo al iniciar cualquier sesión/agente. Actualizarlo al terminar.
-> Última actualización: 2026-11-16 · Fases 1–6 ✅ · Siguiente: **Fase 7 (evidencia y entrega)**
+> Última actualización: 2026-11-17 · Fases 1–7 ✅ · Siguiente: merge del PR de Fase 7, capturas en anexos y entrega
 
 ## Estado actual (diagnóstico inicial)
 
@@ -56,7 +56,11 @@
   - `health-check.yml`: cron `*/5` + manual, 3 intentos; si las credenciales vencieron o no hay EC2 corriendo → warning y sale sin fallar.
   - **Resultado de la prueba (para la pregunta 3 del reporte):** RDS detenida a las 16:30 (hora local) → `DatabaseErrors` 7-10/min → `todo-api-rds-errores` en ALARM a las 16:31 (correo recibido) → health-check manual en `failure`. Cuando RDS terminó de detenerse, cada petición esperó el `connect_timeout` de 3 s → p95 de latencia 138 → ~3100 ms → `todo-api-latencia-alta` en ALARM a las 16:36. RDS arrancada → `/health` healthy, `rds-errores` volvió a OK a las 16:50.
   - 🔁 *Conversación nueva al terminar.*
-- [ ] **Fase 7 — Evidencia y entrega:** README, capturas (tfstate S3, dashboard, alarma en ALARM, runs de Actions), diagrama, reporte PDF ≤ 2 hojas.
+- [x] **Fase 7 — Evidencia y entrega** (rama `docs/fase-7-entrega`):
+  - `README.md`: endpoints, cómo correr en local, secrets, crear/destruir infra (Actions y local), CI/CD, observabilidad.
+  - `docs/arquitectura.svg` (fuente, se ve en el README) + `docs/arquitectura.png` (para el PDF; regenerar con `rsvg-convert -z 2 docs/arquitectura.svg -o docs/arquitectura.png`).
+  - Reporte **fuera del repo** en `Sesion_5/entrega/`: `reporte.html` (fuente editable) → `reporte.pdf` (2 hojas de cuerpo + 1 de anexos con espacios para capturas). Regenerar: Chrome headless `--print-to-pdf`. Pregunta 3 respondida con la alarma `todo-api-rds-errores` (datos de la prueba de Fase 6).
+  - Pendiente del usuario: pegar capturas (tfstate S3, dashboard, alarma en ALARM) en los anexos y exportar el PDF final.
 
 ## Acciones manuales del usuario (fuera del código)
 - [ ] En cada sesión del lab: pegar credenciales en `~/.aws/credentials` (reemplazar `[default]` completo) y verificar con `aws sts get-caller-identity`.
@@ -89,6 +93,8 @@
 
 - 2026-11-16 — Fase 6: PR #9 mergeado → Provision (6 recursos añadidos, EC2/RDS sin cambios, IP igual) → tag `v1.1.0` → Deploy OK. Prueba deteniendo RDS exitosa (ver Fase 6). Infra **arriba** (EC2 `i-0defde2d53f691d9c`, IP 44.201.213.129, RDS arrancada).
 
+- 2026-11-17 — Nueva sesión del lab: secrets AWS renovados; EC2 `i-0defde2d53f691d9c` y RDS arrancaron solas (nueva IP 54.197.14.186), `/version` = `v1.1.0`, `/health` healthy. 3 alarmas en OK. `health-check.yml` ya corre por `schedule` (GitHub lo espacia: 3 runs en ~17 h). Fase 7: README, diagrama y reporte.
+
 ## Siguiente paso exacto
 1. ✅ Commits `13077ad` (infra Fase 1) y `d53aa0b` (feat Fase 2) en `main`, pusheados. **Commits sin Co-Authored-By ni atribución a Claude** (preferencia del usuario).
 2. ✅ Apply de prueba OK (2026-11-16). La infra puede seguir arriba mientras dure el lab; si se apaga, `terraform apply` la recrea.
@@ -96,4 +102,5 @@
 4. ✅ Fase 4 (ver bitácora). Pendiente del usuario: capturas de los 3 runs en Actions para el reporte.
 5. ✅ Fase 5 (ver bitácora). Para publicar una versión: `git switch main && git pull && git tag vX.Y.Z && git push origin vX.Y.Z`.
 6. ✅ Fase 6 (ver bitácora). Verificar en la pestaña Actions que el cron de `health-check.yml` ya corre solo (los `schedule` nuevos tardan en arrancar la primera vez).
-7. **Fase 7 — Evidencia y entrega** (conversación nueva): README (cómo correr, crear y destruir la infra), diagrama, reporte PDF ≤ 2 hojas (justificaciones de umbrales en `alerting/alarms.json`), captura del tfstate en S3. Nota anterior de Fase 6: Puntos de enganche de la métrica de errores RDS: los `except DatabaseError` en `src/main.py` / `src/db.py::_connection`. El usuario solo quiere capturas que pida la rúbrica (dashboard, alarma en ALARM, tfstate S3). Nota: la EC2 actual usa `user_data` viejo; si Fase 6 toca `user_data`/EC2, Terraform la recreará (nueva IP) y el código vendrá de `git clone` de main (versión = hash) hasta el siguiente tag.
+8. **Ahora:** merge del PR `docs/fase-7-entrega`; el usuario toma la captura del tfstate en S3, pega las 3 capturas en `Sesion_5/entrega/reporte.pdf` (anexos) y entrega PDF + link del repo.
+7. ✅ **Fase 7 — Evidencia y entrega**: README (cómo correr, crear y destruir la infra), diagrama, reporte PDF ≤ 2 hojas (justificaciones de umbrales en `alerting/alarms.json`), captura del tfstate en S3. Nota anterior de Fase 6: Puntos de enganche de la métrica de errores RDS: los `except DatabaseError` en `src/main.py` / `src/db.py::_connection`. El usuario solo quiere capturas que pida la rúbrica (dashboard, alarma en ALARM, tfstate S3). Nota: la EC2 actual usa `user_data` viejo; si Fase 6 toca `user_data`/EC2, Terraform la recreará (nueva IP) y el código vendrá de `git clone` de main (versión = hash) hasta el siguiente tag.
