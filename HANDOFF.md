@@ -1,7 +1,7 @@
 # HANDOFF — estado vivo del proyecto
 
 > Leer esto completo al iniciar cualquier sesión/agente. Actualizarlo al terminar.
-> Última actualización: 2026-11-17 · Fases 1–7 ✅ · Siguiente: merge del PR de Fase 7, capturas en anexos y entrega
+> Última actualización: 2026-11-17 · Fases 1–7 ✅ · **Proyecto ENTREGADO y CERRADO** (infra destruida). Para retomar: ver "Cómo retomar" al final.
 
 ## Estado actual (diagnóstico inicial)
 
@@ -95,6 +95,9 @@
 
 - 2026-11-17 — Nueva sesión del lab: secrets AWS renovados; EC2 `i-0defde2d53f691d9c` y RDS arrancaron solas (nueva IP 54.197.14.186), `/version` = `v1.1.0`, `/health` healthy. 3 alarmas en OK. `health-check.yml` ya corre por `schedule` (GitHub lo espacia: 3 runs en ~17 h). Fase 7: README, diagrama y reporte.
 
+- 2026-11-17 — Capturas de anexos tomadas (repetida la prueba deteniendo RDS: `rds-errores` en ALARM). Reporte PDF final generado y **entregado** junto con el link del repo (PR #11 mergeado).
+- 2026-11-17 — **Cierre:** workflow Destroy → toda la infra borrada (EC2, RDS sin snapshot final, secret sin ventana de recuperación, SGs, key pair, SNS, alarmas, dashboard). `health-check.yml` **desactivado** (`gh workflow disable`) para que el cron no corra sin infra. Se conserva solo el bucket `todo-api-tfstate-839144413811` (state vacío, costo ~0).
+
 ## Siguiente paso exacto
 1. ✅ Commits `13077ad` (infra Fase 1) y `d53aa0b` (feat Fase 2) en `main`, pusheados. **Commits sin Co-Authored-By ni atribución a Claude** (preferencia del usuario).
 2. ✅ Apply de prueba OK (2026-11-16). La infra puede seguir arriba mientras dure el lab; si se apaga, `terraform apply` la recrea.
@@ -102,5 +105,11 @@
 4. ✅ Fase 4 (ver bitácora). Pendiente del usuario: capturas de los 3 runs en Actions para el reporte.
 5. ✅ Fase 5 (ver bitácora). Para publicar una versión: `git switch main && git pull && git tag vX.Y.Z && git push origin vX.Y.Z`.
 6. ✅ Fase 6 (ver bitácora). Verificar en la pestaña Actions que el cron de `health-check.yml` ya corre solo (los `schedule` nuevos tardan en arrancar la primera vez).
-8. **Ahora:** merge del PR `docs/fase-7-entrega`; el usuario toma la captura del tfstate en S3, pega las 3 capturas en `Sesion_5/entrega/reporte.pdf` (anexos) y entrega PDF + link del repo.
 7. ✅ **Fase 7 — Evidencia y entrega**: README (cómo correr, crear y destruir la infra), diagrama, reporte PDF ≤ 2 hojas (justificaciones de umbrales en `alerting/alarms.json`), captura del tfstate en S3. Nota anterior de Fase 6: Puntos de enganche de la métrica de errores RDS: los `except DatabaseError` en `src/main.py` / `src/db.py::_connection`. El usuario solo quiere capturas que pida la rúbrica (dashboard, alarma en ALARM, tfstate S3). Nota: la EC2 actual usa `user_data` viejo; si Fase 6 toca `user_data`/EC2, Terraform la recreará (nueva IP) y el código vendrá de `git clone` de main (versión = hash) hasta el siguiente tag.
+
+## Cómo retomar el proyecto
+1. Iniciar el Learner Lab, pegar credenciales en `~/.aws/credentials`, `aws sts get-caller-identity`, renovar los 3 secrets AWS con el loop de `gh secret set` (README).
+2. `gh workflow enable health-check.yml -R EmilioMacB/to-do-list-api`.
+3. Actions → **Provision** (~5 min) → confirmar la suscripción SNS en el correo.
+4. La EC2 nueva arranca con el código de `main` (versión = hash del commit). Para tener `v1.1.0` en `/version`: Actions → **Deploy** → Run workflow con `tag = v1.1.0`.
+5. Reporte y capturas (fuera del repo): `Sesion_5/entrega/` (`reporte.html` → `generar-pdf.sh` → `reporte.pdf`).
